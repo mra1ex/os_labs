@@ -12,6 +12,9 @@
 #include <sys/types.h>
 
 #include "pthread.h"
+#include "common.h"
+
+pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
 
 struct FactorialArgs {
   uint64_t begin;
@@ -19,23 +22,19 @@ struct FactorialArgs {
   uint64_t mod;
 };
 
-uint64_t MultModulo(uint64_t a, uint64_t b, uint64_t mod) {
-  uint64_t result = 0;
-  a = a % mod;
-  while (b > 0) {
-    if (b % 2 == 1)
-      result = (result + a) % mod;
-    a = (a * 2) % mod;
-    b /= 2;
-  }
-
-  return result % mod;
-}
-
 uint64_t Factorial(const struct FactorialArgs *args) {
   uint64_t ans = 1;
 
   // TODO: your code here
+  int start = args->begin;
+  int end = args->end;
+  int mod = args->mod;
+
+  pthread_mutex_lock(&mut);
+  for (int i = start; i <= end; i++) {
+    ans = MultModulo(ans, i, mod);
+  }
+  pthread_mutex_unlock(&mut);
 
   return ans;
 }
@@ -68,10 +67,20 @@ int main(int argc, char **argv) {
       case 0:
         port = atoi(optarg);
         // TODO: your code here
+        if (port <= 0)
+        {
+          printf("Invalid arguments (port)!\n");
+          exit(EXIT_FAILURE);
+        }
         break;
       case 1:
         tnum = atoi(optarg);
         // TODO: your code here
+        if (tnum <= 0)
+        {
+          printf("Invalid arguments (tnum)!\n");
+          exit(EXIT_FAILURE);
+        }
         break;
       default:
         printf("Index %d is out of options\n", option_index);
@@ -103,7 +112,7 @@ int main(int argc, char **argv) {
   server.sin_addr.s_addr = htonl(INADDR_ANY);
 
   int opt_val = 1;
-  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(opt_val));
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(opt_val));// Устанавливается опция `SO_REUSEADDR`, чтобы сокет можно было переиспользовать сразу после закрытия.
 
   int err = bind(server_fd, (struct sockaddr *)&server, sizeof(server));
   if (err < 0) {
@@ -122,7 +131,7 @@ int main(int argc, char **argv) {
   while (true) {
     struct sockaddr_in client;
     socklen_t client_len = sizeof(client);
-    int client_fd = accept(server_fd, (struct sockaddr *)&client, &client_len);
+    int client_fd = accept(server_fd, (struct sockaddr *)&client, &client_len);//Принимается новое подключение от клиента, создается новый сокет для взаимодействия с клиентом (`client_fd`).
 
     if (client_fd < 0) {
       fprintf(stderr, "Could not establish new connection\n");
@@ -145,7 +154,7 @@ int main(int argc, char **argv) {
         break;
       }
 
-      pthread_t threads[tnum];
+      pthread_t threads[tnum]; //Создается массив потоков `threads[tnum]` для параллельного выполнения вычислений факториала.
 
       uint64_t begin = 0;
       uint64_t end = 0;
@@ -154,13 +163,27 @@ int main(int argc, char **argv) {
       memcpy(&end, from_client + sizeof(uint64_t), sizeof(uint64_t));
       memcpy(&mod, from_client + 2 * sizeof(uint64_t), sizeof(uint64_t));
 
-      fprintf(stdout, "Receive: %llu %llu %llu\n", begin, end, mod);
+      fprintf(stdout, "Receive: %lu %lu %lu\n", begin, end, mod);
 
       struct FactorialArgs args[tnum];
+      int factorial_part = (end - begin) / tnum;
       for (uint32_t i = 0; i < tnum; i++) {
         // TODO: parallel somehow
-        args[i].begin = 1;
-        args[i].end = 1;
+        // args[i].begin = 1;
+        // args[i].end = 1;
+        // args[i].mod = mod;
+        if (i != 0) {
+          args[i].begin = (i*factorial_part) + begin + 1;
+        }
+        else {
+          args[i].begin = (i*factorial_part) + begin;
+        }
+        if (i != tnum - 1) {
+          args[i].end = (i + 1)*factorial_part + begin;
+        }
+        else {
+          args[i].end = end;
+        }
         args[i].mod = mod;
 
         if (pthread_create(&threads[i], NULL, ThreadFactorial,
@@ -177,7 +200,8 @@ int main(int argc, char **argv) {
         total = MultModulo(total, result, mod);
       }
 
-      printf("Total: %llu\n", total);
+      // printf("Total: %llu\n", total);
+      printf("port: %d -> Total: %lu\n", port, total);
 
       char buffer[sizeof(total)];
       memcpy(buffer, &total, sizeof(total));

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <signal.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -15,10 +15,21 @@
 #include "find_min_max.h"
 #include "utils.h"
 
+int pnum = -1;
+pid_t *child_pid = NULL;
+
+void on_timeout(int signal) {
+  printf("Timeout occurred. Killing child processes...\n");
+  for (int i = 0; i < pnum; i++) {
+    kill(child_pid[i], SIGKILL); // Отправляем сигнал SIGKILL каждому дочернему процессу
+  }
+}
+
 int main(int argc, char **argv) {
   int seed = -1;
   int array_size = -1;
   int pnum = -1;
+  int timeout = -1;
   bool with_files = false;
 
   while (true) {
@@ -27,6 +38,7 @@ int main(int argc, char **argv) {
     static struct option options[] = {{"seed", required_argument, 0, 0},
                                       {"array_size", required_argument, 0, 0},
                                       {"pnum", required_argument, 0, 0},
+                                      {"timeout", required_argument, 0, 0},
                                       {"by_files", no_argument, 0, 'f'},
                                       {0, 0, 0, 0}};
 
@@ -54,8 +66,10 @@ int main(int argc, char **argv) {
             // error handling
             break;
           case 3:
-            with_files = true;
-            break;
+            if (strcmp(options[option_index].name, "timeout") == 0) {
+            timeout = atoi(optarg); // Сохраняем значение таймаута
+        }
+        break;
 
           defalut:
             printf("Index %d is out of options\n", option_index);
@@ -79,7 +93,7 @@ int main(int argc, char **argv) {
   }
 
   if (seed == -1 || array_size == -1 || pnum == -1) {
-    printf("Usage: %s --seed \"num\" --array_size \"num\" --pnum \"num\" \n",
+    printf("Usage: %s --seed \"num\" --array_size \"num\" --pnum \"num\" --timeout \"num\" \n",
            argv[0]);
     return 1;
   }
@@ -108,9 +122,15 @@ int main(int argc, char **argv) {
           return 1;
       }
     }
+    
+  pid_t child_pid;
+  if (timeout > 0){
+  	signal(SIGALRM, on_timeout);
+    	alarm (timeout);
+    	}
 
   for (int i = 0; i < pnum; i++) {
-    pid_t child_pid = fork();
+    child_pid = fork();
     if (child_pid >= 0) {
       // successful fork
       active_child_processes += 1;
@@ -155,6 +175,10 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
+  
+  if (timeout > 0)
+  	alarm(0);
+  
 
   while (active_child_processes > 0) {
     // your code here
